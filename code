@@ -4,9 +4,9 @@
 #define USERNAME "Shubham_Shende"
 #define DEVICE_ID "ESP32"
 #define DEVICE_CREDENTIAL "c?Zk7Co%duTJ"
-#define ONE_WIRE_BUS 2
-#define TRIGGER_PIN  12
-#define ECHO_PIN     13
+#define ONE_WIRE_BUS 2      //D4
+#define TRIGGER_PIN  12     //D12
+#define ECHO_PIN     13     //D13
 #define SSID "Wireless Hub"
 #define SSID_PASSWORD "3;P*Th3s^TqT"
 
