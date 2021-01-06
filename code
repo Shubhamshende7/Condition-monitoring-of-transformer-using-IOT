@@ -1,15 +1,66 @@
-uint32_t delayMS;
 
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <PubSubClient.h> 
+#include <OneWire.h>
+#include<DallasTemperature.h> 
+#include <Filters.h> //Easy library to do the calculations
+#include <Wire.h>
+
+
+#define ONE_WIRE_BUS 2 // DS18B20 on arduino pin2 corresponds to D4 on physical board
+#define S0  2
+#define S1  4
+#define S2  18
+#define S3  19
+#define OUT 5
+
+#define LedRed 7
+#define LedBlue 8
+
 
 const int trigPin = 12;
 const int echoPin = 13;
-const char ledPin = 2;
+const char ledPin = 2;      //IBM status indicator
 
-const char* ssid = "-------------";
-const char* password = "----------";
+const int sensorIn = 35;    //Current Sensor input
+int mVperAmp = 185; // use 185 for 5A, 100 for 20A Module and 66 for 30A Module
+
+
+int duration;               //Oil level
+int distance;               //oil level
+
+int R,B = 0;                //Color sensor values
+
+int Sensor = 34;             //Voltage Sensor analog input, here it's 35
+double Voltage = 0;
+double VRMS = 0;
+double AmpsRMS = 0;
+
+
+float oil_temperature;
+int secondary_voltage;
+int secondary_current;
+
+
+float testFrequency = 50;                     // test signal frequency (Hz)
+float windowLength = 40.0/testFrequency;     // how long to average the signal, for statistist
+float intercept = -0.04; // to be adjusted based on calibration testing
+float slope = 0.0405; // to be adjusted based on calibration testing
+float current_Volts; // Voltage
+
+unsigned long printPeriod = 1000; //Refresh rate
+unsigned long previousMillis = 0;
+
+char silica_gel_color;
+
+const char* ssid = "Wireless Hub";
+const char* password = "3;P*Th3s^TqT";
+
+
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature DS18B20(&oneWire);
+
 
 #define ORG "5ez1rt"
 #define DEVICE_TYPE "ESP32"
@@ -18,7 +69,11 @@ const char* password = "----------";
 
 
 char server[] = ORG ".messaging.internetofthings.ibmcloud.com";
-char pubTopic[] = "iot-2/evt/status/fmt/json";
+char pubTopic1[] = "iot-2/evt/oil level/fmt/json";
+char pubTopic2[] = "iot-2/evt/oil temperature/fmt/json";
+char pubTopic3[] = "iot-2/evt/silica gel color/fmt/json";
+char pubTopic4[] = "iot-2/evt/secondary voltage/fmt/json";
+char pubTopic5[] = "iot-2/evt/secondary current/fmt/json";
 char subTopic[] = "iot-2/cmd/test/fmt/String";
 char authMethod[] = "use-token-auth";
 char token[] = TOKEN;
@@ -41,10 +96,43 @@ void receivedCallback(char* pubTopic, byte* payload, unsigned int length) {
 
 void setup() {
     Serial.begin(115200);
+    
     Serial.println();
-    pinMode(ledPin, OUTPUT);
+    DS18B20.begin();
+    pinMode(ledPin, OUTPUT);   //IBM status indicator
+
+
+     /*io of ultrasonic sensor*/
     pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
     pinMode(echoPin, INPUT); // Sets the echoPin as an Input
+
+    /*io of color sensor*/
+    pinMode(S0, OUTPUT);
+    pinMode(S1, OUTPUT);
+    pinMode(S2, OUTPUT);
+    pinMode(S3, OUTPUT);
+    pinMode(OUT, INPUT);
+
+    pinMode(LedRed, OUTPUT);
+    pinMode(LedBlue, OUTPUT);
+    
+    // Setting frequency-scaling to 20%
+    digitalWrite(S0,HIGH);
+    digitalWrite(S1,LOW);
+
+    // To make the color indicator LED blink
+  for (int i=0; i<=5; i++){
+    digitalWrite(LedRed, !digitalRead(LedRed));
+    digitalWrite(LedBlue, !digitalRead(LedBlue));
+    delay(250);
+  }
+
+     /*io of current sensor*/
+    pinMode(35, INPUT);
+    delay(10);
+    Serial.println(F("Initialising Voltage sensor"));
+
+  
     Serial.println("Tracking and control of transformer using IOT");
     
     Serial.print("Connecting to "); 
@@ -77,37 +165,193 @@ void setup() {
 }
 
 long lastMsg = 0;
-long duration;
-int distance;
+
 
 void loop() {
-    delay(delayMS);
-    duration = pulseIn(echoPin, HIGH);  
+
     client.loop();
     long now = millis();
     if (now - lastMsg > 3000) {
         lastMsg = now;
-        digitalWrite(trigPin, HIGH);
-        delayMicroseconds(10);
-        digitalWrite(trigPin, LOW);
-        distance= duration*0.034/2;
-        
-        String payload = "{\"d\":{\"Name\":\"" DEVICE_ID "\"";
-               payload += ",\"distance\":";
-               payload += distance;
-               payload += "}}";
-        Serial.print("Sending payload: ");
-        Serial.println(payload);
 
-        if (client.publish(pubTopic, (char*) payload.c_str())) {
+      /*program for ultrasonic sensor starts here*/
+      digitalWrite(trigPin, LOW);  // Get Start
+      delayMicroseconds(2); // stable the line 
+      digitalWrite(trigPin, HIGH); // sending 10 us pulse
+      delayMicroseconds(10); // delay 
+      digitalWrite(trigPin, LOW); // after sending pulse wating to receive signals 
+      duration = pulseIn(echoPin, HIGH); // calculating time 
+      distance = (duration/2) / 29.1; // single path 
+        //duration = analogRead(echoPin);
+        //delay(100);
+        //distance= duration*0.034/2;
+
+        /*program for temperature sensor starts here*/
+        DS18B20.requestTemperatures(); 
+        float temperatureC = DS18B20.getTempCByIndex(0);
+        float temperatureF = DS18B20.getTempFByIndex(0);
+        Serial.print(temperatureC);
+        Serial.println("ºC");
+        Serial.print(temperatureF);
+        Serial.println("ºF");
+        delay(5000);
+
+         // Setting red filtered photodiodes to be read Red frequency
+         digitalWrite(S2,LOW);
+         digitalWrite(S3,LOW);
+         R = pulseIn(OUT, LOW);  // Reading the output Red frequency
+         delay(100); 
+        // Setting Blue filtered photodiodes to be read Blue frequency
+        digitalWrite(S2,LOW);
+        digitalWrite(S3,HIGH);
+        B = pulseIn(OUT, LOW);  // Reading the output Blue frequency
+        delay(100);
+       // Print RGB Sensor Values
+       Serial.print("R= "); 
+       Serial.print(R);
+       Serial.print(" | ");
+       Serial.print("B= ");
+       Serial.print(B);
+       Serial.println();
+       delay(200);
+
+       /*program for voltage sensor starts here*/
+       
+       RunningStatistics inputStats;                //Easy life lines, actual calculation of the RMS requires a load of coding
+       inputStats.setWindowSecs( windowLength );
+
+       while( true ) {   
+        Sensor = analogRead(34);  // read the analog in value:
+        inputStats.input(Sensor);  // log to Stats function
+        
+    if((unsigned long)(millis() - previousMillis) >= printPeriod) {
+      previousMillis = millis();   // update time every second
+            
+      Serial.print( "\n" );
+      
+      current_Volts = intercept + slope * inputStats.sigma(); //Calibartions for offset and amplitude
+      current_Volts= current_Volts*(40.3231);                //Further calibrations for the amplitude
+      
+      Serial.print( "\tVoltage: " );
+      Serial.print( current_Volts ); //Calculation and Value display is done the rest is if you're using an OLED display
+    }
+       }
+
+
+       /*program for current sensor starts here*/
+       Voltage = getVPP();
+       VRMS = (Voltage/2.0) *0.707; // sq root  
+       AmpsRMS = (VRMS * 1000)/mVperAmp;
+       float Wattage = (220*AmpsRMS)-18; //Observed 18-20 Watt when no load was connected,so substracting offset value to get real consumption.
+       Serial.print(AmpsRMS);
+       Serial.println(" Amps RMS ");
+       Serial.print(Wattage);
+       Serial.println(" Watt ");
+
+
+       
+    
+                  
+        String payload1 = "{\"d\":{\"Name\":\"" DEVICE_ID "\"";
+               payload1 += ",\"distance\":";
+               payload1 += distance;
+               payload1 += "}}";
+        Serial.print("Sending payload1: ");
+        Serial.println(payload1);
+
+        if (client.publish(pubTopic1, (char*) payload1.c_str())) {
             Serial.println("Publish ok");
-        digitalWrite(ledPin, HIGH);
-        delay(1000);
-        digitalWrite(ledPin, LOW);
-        delay(1000);
+        } else {
+            Serial.println("Publish failed");
+        }
+
+
+        String payload2 = "{\"d\":{\"Name\":\"" DEVICE_ID "\"";
+               payload2 += ",\"oil_temperature\":";
+               payload2 += oil_temperature;
+               payload2 += "}}";
+        Serial.print("Sending payload2: ");
+        Serial.println(payload2);
+
+        if (client.publish(pubTopic2, (char*) payload2.c_str())) {
+            Serial.println("Publish ok");
+        } else {
+            Serial.println("Publish failed");
+        }
+
+
+        String payload3 = "{\"d\":{\"Name\":\"" DEVICE_ID "\"";
+               payload3 += ",\"silica_gel_color\":";
+               payload3 += silica_gel_color;
+               payload3 += "}}";
+        Serial.print("Sending payload3: ");
+        Serial.println(payload3);
+
+        if (client.publish(pubTopic3, (char*) payload3.c_str())) {
+            Serial.println("Publish ok");
+        } else {
+            Serial.println("Publish failed");
+        }
+
+
+        String payload4 = "{\"d\":{\"Name\":\"" DEVICE_ID "\"";
+               payload4 += ",\"secondary_voltage\":";
+               payload4 += secondary_voltage;
+               payload4 += "}}";
+        Serial.print("Sending payload4: ");
+        Serial.println(payload4);
+
+        if (client.publish(pubTopic4, (char*) payload4.c_str())) {
+            Serial.println("Publish ok");
+        } else {
+            Serial.println("Publish failed");
+        }
+
+
+        String payload5 = "{\"d\":{\"Name\":\"" DEVICE_ID "\"";
+               payload5 += ",\"secondary current\":";
+               payload5 += secondary_current;
+               payload5 += "}}";
+        Serial.print("Sending payload5: ");
+        Serial.println(payload5);
+
+        if (client.publish(pubTopic5, (char*) payload5.c_str())) {
+            Serial.println("Publish ok");
         } else {
             Serial.println("Publish failed");
         }
     }
 }
-[/code]
+float getVPP()
+{
+float result;
+int readValue; //value read from the sensor
+int maxValue = 0; // store max value here
+int minValue = 1024; // store min value here
+uint32_t start_time = millis();
+while((millis()-start_time) < 1000) //sample for 1 Sec
+{
+readValue = analogRead(sensorIn);
+// see if you have a new maxValue
+if (readValue > maxValue)
+{
+/*record the maximum sensor value*/
+maxValue = readValue;
+}
+if (readValue < minValue)
+{
+/*record the maximum sensor value*/
+minValue = readValue;
+}
+/* Serial.print(readValue);
+Serial.println(" readValue ");
+Serial.print(maxValue);
+Serial.println(" maxValue ");
+Serial.print(minValue);
+Serial.println(" minValue ");
+delay(1000); */
+}
+// Subtract min from max
+result = ((maxValue - minValue) * 5)/1024.0;
+return result;
+}
