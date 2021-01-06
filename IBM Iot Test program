@@ -1,0 +1,115 @@
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <PubSubClient.h> 
+
+
+const int trigPin = 12;
+const int echoPin = 13;
+const char ledPin = 2;
+int duration;
+int distance;
+
+const char* ssid = "Wireless Hub";
+const char* password = "3;P*Th3s^TqT";
+
+#define ORG "5ez1rt"
+#define DEVICE_TYPE "ESP32"
+#define DEVICE_ID "247F671C5210"
+#define TOKEN "*iiD3&n2ylF1)WJWYQ"
+
+
+char server[] = ORG ".messaging.internetofthings.ibmcloud.com";
+char pubTopic[] = "iot-2/evt/oil level/fmt/json";
+char subTopic[] = "iot-2/cmd/test/fmt/String";
+char authMethod[] = "use-token-auth";
+char token[] = TOKEN;
+char clientId[] = "d:" ORG ":" DEVICE_TYPE ":" DEVICE_ID;
+
+WiFiClient wifiClient;
+PubSubClient client(server, 1883, NULL, wifiClient);
+
+void receivedCallback(char* pubTopic, byte* payload, unsigned int length) {
+  Serial.print("Message received: ");
+  Serial.println(pubTopic);
+
+  Serial.print("payload: ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+  /* we got '1' -> on */
+}
+
+void setup() {
+    Serial.begin(115200);
+    Serial.println();
+    pinMode(ledPin, OUTPUT);
+    pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
+    pinMode(echoPin, INPUT); // Sets the echoPin as an Input
+    Serial.println("Tracking and control of transformer using IOT");
+    
+    Serial.print("Connecting to "); 
+    Serial.print(ssid);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+    } 
+    Serial.println("");
+    
+    Serial.print("WiFi connected, IP address: "); 
+    Serial.println(WiFi.localIP());
+
+    if (!client.connected()) {
+        Serial.print("Reconnecting client to ");
+        Serial.println(server);
+        while (!client.connect(clientId, authMethod, token)) {
+            Serial.print(".");
+            delay(500);
+        }
+        client.setCallback(receivedCallback);
+        if (client.subscribe(subTopic)) {
+            Serial.println("subscribe to cmd OK");
+        } else {
+            Serial.println("subscribe to cmd FAILED");
+        }
+        Serial.println("IBM Watson IoT connected");
+    }
+}
+
+long lastMsg = 0;
+
+
+void loop() {
+
+    client.loop();
+    long now = millis();
+    if (now - lastMsg > 3000) {
+        lastMsg = now;
+
+      digitalWrite(trigPin, LOW);  // Get Start
+      delayMicroseconds(2); // stable the line 
+      digitalWrite(trigPin, HIGH); // sending 10 us pulse
+      delayMicroseconds(10); // delay 
+      digitalWrite(trigPin, LOW); // after sending pulse wating to receive signals 
+      duration = pulseIn(echoPin, HIGH); // calculating time 
+      distance = (duration/2) / 29.1; // single path 
+        //duration = analogRead(echoPin);
+        //delay(100);
+        //distance= duration*0.034/2;
+        
+        String payload = "{\"d\":{\"Name\":\"" DEVICE_ID "\"";
+               payload += ",\"distance\":";
+               payload += distance;
+               payload += "}}";
+        Serial.print("Sending payload: ");
+        Serial.println(payload);
+
+        if (client.publish(pubTopic, (char*) payload.c_str())) {
+            Serial.println("Publish ok");
+        } else {
+            Serial.println("Publish failed");
+        }
+    }
+}
