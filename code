@@ -1,12 +1,7 @@
-
+#include <SPI.h>
 #include <WiFi.h>
-#include <WiFiClient.h>
-#include <PubSubClient.h> 
 #include <OneWire.h>
-#include<DallasTemperature.h> 
-#include <Filters.h> //Easy library to do the calculations
-#include <Wire.h>
-
+#include <DallasTemperature.h>
 
 #define ONE_WIRE_BUS 2 // DS18B20 on arduino pin2 corresponds to D4 on physical board
 #define S0  2
@@ -196,7 +191,8 @@ void loop() {
         Serial.println("ºF");
         delay(5000);
 
-         // Setting red filtered photodiodes to be read Red frequency
+       /* program for color sensor starts from below*/
+       // Setting red filtered photodiodes to be read Red frequency
          digitalWrite(S2,LOW);
          digitalWrite(S3,LOW);
          R = pulseIn(OUT, LOW);  // Reading the output Red frequency
@@ -322,6 +318,9 @@ void loop() {
         }
     }
 }
+
+
+/* function for measuring current*/
 float getVPP()
 {
 float result;
