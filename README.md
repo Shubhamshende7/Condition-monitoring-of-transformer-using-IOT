@@ -1,4 +1,4 @@
-# Mproject
+# Condition monitoring of transformer using IOT
 The primary objective of this electrical project idea is to monitor distribution transformer health and send data to the IoT dashboard. Transformer Health parameters to be monitored in these projects are as follows:
 
 Oil Level
